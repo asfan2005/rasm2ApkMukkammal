@@ -5,6 +5,9 @@ import * as ImagePicker from 'expo-image-picker';
 export default function Galeriya() {
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [checkingResult, setCheckingResult] = useState(false);
+  const [result, setResult] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState('');
 
   const pickImage = async () => {
     try {
@@ -13,21 +16,29 @@ export default function Galeriya() {
         Alert.alert('Xatolik', 'Galereyadan foydalanish uchun ruxsat berilmadi');
         return;
       }
-
+  
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'Images',
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        aspect: undefined,
+        quality: 1,
+        cropping: false,
+        presentationStyle: 'fullScreen',
+        exif: true,
+        base64: false,
+        videoQuality: undefined,
+        allowsMultipleSelection: false
       });
-
+  
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setImage(result.assets[0].uri);
+        const selectedImage = result.assets[0];
+        setImage(selectedImage.uri);
       }
     } catch (error) {
       Alert.alert('Xatolik', 'Rasm tanlashda xatolik yuz berdi');
     }
   };
+  
 
   const getFfValueFromServer = async () => {
     try {
@@ -39,27 +50,54 @@ export default function Galeriya() {
     }
   };
 
+  const checkSubmissionStatus = async (fileHash) => {
+    try {
+      const url = `https://samaralitalim.uz/javoblarni_takshir.asp?fayl=${fileHash}`;
+      const response = await fetch(url);
+      const text = await response.text().then(t => t.trim());
+      
+      console.log('Natija:', text);
+
+      if (text === "0") {
+        return "0"; // Hali tekshirilmoqda
+      } 
+      else if (text.startsWith("1:")) {
+        const score = text.split(":")[1].replace(",", ".");
+        return { success: true, score: score };
+      }
+      else if (text === "-1") {
+        return { success: false, error: 'Xatolik yuz berdi' };
+      }
+      else {
+        return { success: false, error: 'Kutilmagan natija' };
+      }
+    } catch (error) {
+      console.error('Status tekshirishda xatolik:', error);
+      throw error;
+    }
+  };
+
   const handleUpload = async () => {
     if (!image) {
-      Alert.alert("Xatolik", "Rasm tanlanmagan");
+      Alert.alert("Xatolik", "Iltimos, avval rasm tanlang");
       return;
     }
 
     try {
       setLoading(true);
+      setUploadStatus('Rasm yuklanmoqda...');
+      
       const ffValue = await getFfValueFromServer();
-
-      const filename = image.split('/').pop();
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : 'image/jpeg';
-
+      
       const formData = new FormData();
+      const filename = image.split('/').pop();
+      
       formData.append('javob_file', {
-        uri: image,
-        type: type,
+        uri: Platform.OS === 'ios' ? image.replace('file://', '') : image,
+        type: 'image/jpeg',
         name: filename || 'photo.jpg',
       });
-
+      
       formData.append('katalog', '0');
       formData.append('avtor', '0');
       formData.append('ff', ffValue);
@@ -69,58 +107,108 @@ export default function Galeriya() {
         method: 'POST',
         body: formData,
         headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'multipart/form-data'
+          'Accept': '*/*',
+          'Content-Type': 'multipart/form-data',
         },
       });
 
-      if (uploadResponse.ok) {
-        Alert.alert(
-          "Muvaffaqiyatli", 
-          "Rasm yuborildi!",
-          [{ text: "OK", onPress: () => setImage(null) }]
-        );
-      } else {
-        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+      const responseText = await uploadResponse.text();
+      console.log('Upload response:', responseText);
+
+      if (!responseText || responseText.includes('error')) {
+        throw new Error('Yuklashda xatolik');
       }
+
+      const fileHash = responseText.trim();
+      setCheckingResult(true);
+      setUploadStatus('Natija tekshirilmoqda...');
+
+      let attempts = 0;
+      const maxAttempts = 30;
+      const checkInterval = setInterval(async () => {
+        try {
+          const status = await checkSubmissionStatus(fileHash);
+          
+          if (status === "0" && attempts < maxAttempts) {
+            setUploadStatus(`Tekshirilmoqda... (${attempts + 1}/${maxAttempts})`);
+            attempts++;
+          } else {
+            clearInterval(checkInterval);
+            
+            if (status.success) {
+              const finalResult = `Sizning balingiz: ${status.score} ball`;
+              setResult(finalResult);
+              setUploadStatus('');
+              setImage(null);
+              Alert.alert("Natija", finalResult);
+            } else {
+              setUploadStatus(status.error || 'Xatolik yuz berdi');
+              Alert.alert("Xatolik", status.error || 'Natijani olishda xatolik');
+            }
+          }
+        } catch (error) {
+          clearInterval(checkInterval);
+          setUploadStatus('Xatolik yuz berdi');
+          Alert.alert("Xatolik", "Natijani tekshirishda xatolik");
+        }
+      }, 2000);
+
     } catch (error) {
-      Alert.alert("Xatolik", "Rasm yuborishda xatolik yuz berdi. Iltimos qayta urinib koring");
+      console.error('Upload error:', error);
+      setUploadStatus('Xatolik yuz berdi');
+      Alert.alert("Xatolik", "Rasm yuborishda xatolik. Qayta urinib ko'ring");
     } finally {
       setLoading(false);
+      setCheckingResult(false);
     }
   };
 
   return (
     <View style={styles.container}>
-      {image ? (
-        <View style={styles.imageContainer}>
-          <Image source={{ uri: image }} style={styles.image} />
+      {result ? (
+        <View style={styles.resultContainer}>
+          <Text style={styles.resultText}>{result}</Text>
           <TouchableOpacity 
-            style={[styles.button, styles.uploadButton]} 
-            onPress={handleUpload}
-            disabled={loading}
+            style={[styles.button, styles.newImageButton]} 
+            onPress={() => {
+              setResult(null);
+              pickImage();
+            }}
           >
-            {loading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.buttonText}>Rasmni yuborish</Text>
-            )}
+            <Text style={styles.buttonText}>Yangi rasm yuklash</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <TouchableOpacity style={styles.button} onPress={pickImage}>
-          <Text style={styles.buttonText}>Galereyadan tanlash</Text>
-        </TouchableOpacity>
+        <>
+          {image ? (
+            <View style={styles.imageContainer}>
+              <Image source={{ uri: image }} style={styles.image} />
+              <TouchableOpacity 
+                style={[styles.button, styles.uploadButton]} 
+                onPress={handleUpload}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.buttonText}>Rasmni yuborish</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.button} onPress={pickImage}>
+              <Text style={styles.buttonText}>Galereyadan tanlash</Text>
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
-      <Modal transparent visible={loading}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <ActivityIndicator size="large" color="#f4511e" />
-            <Text style={styles.loadingText}>Rasm yuklanmoqda...</Text>
-          </View>
+      {uploadStatus ? (
+        <View style={styles.statusContainer}>
+          <Text style={styles.statusText}>{uploadStatus}</Text>
+          {(loading || checkingResult) && <ActivityIndicator style={styles.statusSpinner} color="#f4511e" />}
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }
@@ -173,5 +261,36 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
+  },
+  statusContainer: {
+    marginTop: 20,
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    width: '90%',
+  },
+  statusText: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  statusSpinner: {
+    marginTop: 10,
+  },
+  resultText: {
+    marginTop: 20,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  resultContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newImageButton: {
+    marginTop: 20,
+    backgroundColor: '#2196F3',
   }
 });

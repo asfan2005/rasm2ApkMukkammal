@@ -1,13 +1,13 @@
 {
   "expo": {
     "name": "Rasm App",
-    "slug": "rasm-app",
+    "slug": "rasm",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#2A2A2A"
     },
@@ -15,21 +15,23 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.asfandiyor005.rasmapp"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#2A2A2A"
       },
-      "package": "com.yourname.rasmapp"
+      "package": "com.asfandiyor005.rasmapp",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
-        "projectId": "47aedc6f-6bce-4d54-a32a-d7e41d9d5cb3"
+        "projectId": "a7b6eeec-1ac8-49a3-a3ce-d5145e4180e8"
       }
     },
     "owner": "asfandiyor005"

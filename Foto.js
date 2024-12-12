@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Image, Text, StyleSheet, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, Image, Text, StyleSheet, TouchableOpacity, Alert, Modal, ActivityIndicator, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 
 export default function Foto() {
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [resultMessage, setResultMessage] = useState('');
 
   const requestPermission = async (permissionFunc, errorMessage) => {
     const { status } = await permissionFunc();
@@ -16,21 +17,28 @@ export default function Foto() {
   };
 
   const pickImageFromGallery = async () => {
-    const granted = await requestPermission(
-      ImagePicker.requestMediaLibraryPermissionsAsync,
-      'Galereyadan foydalanish uchun ruxsat berilmadi'
-    );
-    if (!granted) return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert("Xatolik", "Galereyaga ruxsat berilmadi");
+        return;
+      }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 1,
+        base64: false,
+        exif: false,
+      });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      setImage(result.assets[0].uri);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setImage(result.assets[0].uri);
+        setResultMessage('');
+      }
+    } catch (error) {
+      Alert.alert("Xatolik", "Rasm tanlashda xatolik yuz berdi");
     }
   };
 
@@ -43,9 +51,10 @@ export default function Foto() {
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
+      allowsEditing: false,
       quality: 1,
+      base64: false,
+      exif: false,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -55,28 +64,33 @@ export default function Foto() {
 
   const handleUpload = async () => {
     if (!image) {
-      Alert.alert('Xatolik', 'Rasm tanlanmagan');
+      Alert.alert("Xatolik", "Iltimos rasm tanlang");
       return;
     }
 
     try {
       setLoading(true);
+      setResultMessage('Rasm yuklanmoqda...');
 
-      const ffResponse = await fetch('https://samaralitalim.uz/javoblar_ei_mobi.asp');
-      const ffValue = await ffResponse.text();
+      // FF qiymatini olish
+      const response = await fetch('https://samaralitalim.uz/javoblar_ei_mobi.asp');
+      const ffValue = await response.text();
       
+      // Rasmni to'g'ri formatda tayyorlash
+      const imageUri = Platform.OS === 'ios' ? image.replace('file://', '') : image;
+
       const formData = new FormData();
       formData.append('javob_file', {
-        uri: image,
+        uri: imageUri,
         type: 'image/jpeg',
-        name: 'javob_file.jpg',
+        name: 'photo.jpg',
       });
-      
       formData.append('katalog', '0');
       formData.append('avtor', '1');
-      formData.append('ff', ffValue);
+      formData.append('ff', ffValue.trim());
       formData.append('Saqlsh', 'Submit');
 
+      // Rasmni yuklash
       const uploadResponse = await fetch('https://samaralitalim.uz/class_request_javob.asp', {
         method: 'POST',
         body: formData,
@@ -86,14 +100,54 @@ export default function Foto() {
         },
       });
 
-      if (uploadResponse.ok) {
-        Alert.alert('Muvaffaqiyatli', 'Rasm muvaffaqiyatli yuklandi!');
-        setImage(null);
-      } else {
-        Alert.alert('Xatolik', 'Rasm yuklashda xatolik yuz berdi');
+      if (!uploadResponse.ok) {
+        throw new Error('Yuklashda xatolik yuz berdi');
       }
+
+      setResultMessage('Natija tekshirilmoqda...');
+
+      // Natijani tekshirish
+      let attempts = 0;
+      const maxAttempts = 45; // Urinishlar sonini ko'paytirdik
+      const delay = 3000; // Har bir so'rov orasidagi vaqt (3 sekund)
+      
+      const checkResult = async () => {
+        while (attempts < maxAttempts) {
+          try {
+            const checkResponse = await fetch(`https://samaralitalim.uz/javoblarni_takshir.asp?fayl=${ffValue.trim()}`);
+            const resultText = await checkResponse.text();
+
+            if (resultText.includes('-1:')) {
+              const result = `Sizning balingiz: Tekshirilmadi`;
+              setResultMessage(result);
+              Alert.alert("Natija", result);
+              return true;
+            }
+
+            if (resultText.includes('1:')) {
+              const score = resultText.split(':')[1].trim();
+              const result = `Sizning balingiz: ${score}`;
+              setResultMessage(result);
+              Alert.alert("Muvaffaqiyatli", result);
+              return true;
+            }
+
+            attempts++;
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } catch (error) {
+            console.error('Tekshirishda xatolik:', error);
+            continue;
+          }
+        }
+        throw new Error('Vaqt tugadi. Qayta urinib ko\'ring');
+      };
+
+      await checkResult();
+
     } catch (error) {
-      Alert.alert('Xatolik', 'Rasm yuklashda xatolik yuz berdi');
+      console.error('Xatolik:', error);
+      setResultMessage(`Xatolik yuz berdi: ${error.message}`);
+      Alert.alert("Xatolik", error.message);
     } finally {
       setLoading(false);
     }
@@ -118,6 +172,10 @@ export default function Foto() {
           <Text style={styles.buttonText}>Galereyadan tanlash</Text>
         </TouchableOpacity>
       </View>
+
+      {resultMessage ? (
+        <Text style={styles.resultText}>{resultMessage}</Text>
+      ) : null}
 
       <Modal transparent visible={loading}>
         <View style={styles.modalContainer}>
@@ -182,5 +240,15 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
+  },
+  resultText: {
+    marginTop: 20,
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    width: '90%',
   },
 });
