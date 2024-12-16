@@ -1,11 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Image, Text, StyleSheet, TouchableOpacity, Alert, Modal, ActivityIndicator, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function Foto() {
+export default function Foto({ route, navigation }) {
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
+  const [katalog, setKatalog] = useState(null);
+
+  useEffect(() => {
+    const fetchKatalog = async () => {
+      try {
+        // Kelgan ID ni olish va AsyncStorage ga saqlash
+        const { selectedId } = route.params || {};
+        if (selectedId) {
+          const katalogString = selectedId.toString();
+          await AsyncStorage.setItem('selectedKatalog', katalogString);
+          setKatalog(katalogString);
+        } else {
+          // Agar yangi ID kelmasa, oldingi saqlangan katalogni olish
+          const storedKatalog = await AsyncStorage.getItem('selectedKatalog');
+          if (storedKatalog) {
+            setKatalog(storedKatalog);
+          }
+        }
+      } catch (error) {
+        console.error('Katalog olishda xatolik:', error);
+        Alert.alert('Xatolik', 'Katalog ma\'lumotlarini olishda muammo yuz berdi');
+      }
+    };
+
+    fetchKatalog();
+  }, [route.params]);
 
   const requestPermission = async (permissionFunc, errorMessage) => {
     const { status } = await permissionFunc();
@@ -29,8 +56,6 @@ export default function Foto() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 1,
-        base64: false,
-        exif: false,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -53,8 +78,6 @@ export default function Foto() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
       quality: 1,
-      base64: false,
-      exif: false,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -63,6 +86,12 @@ export default function Foto() {
   };
 
   const handleUpload = async () => {
+    // Katalog mavjudligini tekshirish
+    if (!katalog) {
+      Alert.alert("Xatolik", "Katalog topilmadi");
+      return;
+    }
+
     if (!image) {
       Alert.alert("Xatolik", "Iltimos rasm tanlang");
       return;
@@ -73,8 +102,8 @@ export default function Foto() {
       setResultMessage('Rasm yuklanmoqda...');
 
       // FF qiymatini olish
-      const response = await fetch('https://samaralitalim.uz/javoblar_ei_mobi.asp');
-      const ffValue = await response.text();
+      const ffResponse = await fetch('https://samaralitalim.uz/javoblar_ei_mobi.asp');
+      const ffValue = await ffResponse.text();
       
       // Rasmni to'g'ri formatda tayyorlash
       const imageUri = Platform.OS === 'ios' ? image.replace('file://', '') : image;
@@ -85,7 +114,9 @@ export default function Foto() {
         type: 'image/jpeg',
         name: 'photo.jpg',
       });
-      formData.append('katalog', '0');
+      
+      // Saqlab olingan katalog nomini ishlatish
+      formData.append('katalog', katalog);
       formData.append('avtor', '1');
       formData.append('ff', ffValue.trim());
       formData.append('Saqlsh', 'Submit');
@@ -107,12 +138,11 @@ export default function Foto() {
       setResultMessage('Natija tekshirilmoqda...');
 
       // Natijani tekshirish
-      let attempts = 0;
-      const maxAttempts = 45; // Urinishlar sonini ko'paytirdik
-      const delay = 3000; // Har bir so'rov orasidagi vaqt (3 sekund)
-      
       const checkResult = async () => {
-        while (attempts < maxAttempts) {
+        const maxAttempts = 15;
+        const delay = 5000;
+        
+        for (let attempts = 0; attempts < maxAttempts; attempts++) {
           try {
             const checkResponse = await fetch(`https://samaralitalim.uz/javoblarni_takshir.asp?fayl=${ffValue.trim()}`);
             const resultText = await checkResponse.text();
@@ -121,7 +151,7 @@ export default function Foto() {
               const result = `Sizning balingiz: Tekshirilmadi`;
               setResultMessage(result);
               Alert.alert("Natija", result);
-              return true;
+              return;
             }
 
             if (resultText.includes('1:')) {
@@ -129,17 +159,20 @@ export default function Foto() {
               const result = `Sizning balingiz: ${score}`;
               setResultMessage(result);
               Alert.alert("Muvaffaqiyatli", result);
-              return true;
+              return;
             }
 
-            attempts++;
+            // Keyingi urinishdan oldin kutish
             await new Promise(resolve => setTimeout(resolve, delay));
           } catch (error) {
             console.error('Tekshirishda xatolik:', error);
-            continue;
+            
+            // Agar oxirgi urinish bo'lsa, xatolikni ko'rsatamiz
+            if (attempts === maxAttempts - 1) {
+              throw new Error('Vaqt tugadi. Qayta urinib ko\'ring');
+            }
           }
         }
-        throw new Error('Vaqt tugadi. Qayta urinib ko\'ring');
       };
 
       await checkResult();
