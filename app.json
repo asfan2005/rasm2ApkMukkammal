@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Rasm App",
-    "slug": "rasm",
+    "slug": "rasm2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -31,7 +31,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "a7b6eeec-1ac8-49a3-a3ce-d5145e4180e8"
+        "projectId": "928fd598-498a-4b46-83cc-9a4d5a374acf"
       }
     },
     "owner": "asfandiyor005"
